@@ -19,7 +19,7 @@ class transaction extends uvm_sequence_item;
   `uvm_object_utils_end
 endclass
 
-// ================= generator (sequence) =================
+// ================= generator =================
 class generator extends uvm_sequence #(transaction);
   transaction t;
   function new(string name = "generator"); super.new(name); endfunction
@@ -94,14 +94,12 @@ class monitor extends uvm_monitor;
       @(posedge aif.clk);
       #2; //settling time
       
-      if (!first_cycle) begin
-        
+      if (!first_cycle) begin  
         t = transaction::type_id::create("t");
-        t.a      = prev_a;     
-        t.b      = prev_b;      
-        t.opsel  = prev_opsel;  
-        t.result = aif.result; 
-        
+        t.a = prev_a;     
+        t.b = prev_b;      
+        t.opsel = prev_opsel;  
+        t.result = aif.result;      
         `uvm_info("MON", $sformatf("To scoreboard a:%0d b:%0d opsel:%0d result:%0d",
                    t.a, t.b, t.opsel, t.result), UVM_LOW)
         send.write(t);
@@ -110,8 +108,8 @@ class monitor extends uvm_monitor;
         first_cycle = 0;
       end
       
-      prev_a     = aif.a;
-      prev_b     = aif.b;
+      prev_a = aif.a;
+      prev_b = aif.b;
       prev_opsel = aif.opsel;
     end
   endtask
@@ -228,8 +226,7 @@ class test extends uvm_test;
     phase.drop_objection(this);
   endtask
 endclass
-
-
+////////////////////////
 module alu_tb;
   logic clk;
   logic rst;
@@ -252,9 +249,7 @@ module alu_tb;
     uvm_config_db#(virtual alu_vif)::set(null, "uvm_test_top.e.a.*", "aif", aif);
     run_test("test");
   end
-  
-  
-  
+      
 endmodule
       
     
