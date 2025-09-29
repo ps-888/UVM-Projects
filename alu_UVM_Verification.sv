@@ -5,8 +5,8 @@ import uvm_pkg::*;
 
 // ================= transaction =================
 class transaction extends uvm_sequence_item;
-  rand logic [3:0] a, b;
-  rand logic [2:0] opsel;
+  randc logic [3:0] a, b;
+  randc logic [2:0] opsel;
   logic [15:0] result;
 
   function new(string name = "transaction"); super.new(name); endfunction
@@ -19,23 +19,86 @@ class transaction extends uvm_sequence_item;
   `uvm_object_utils_end
 endclass
 
-// ================= generator =================
+// ================= functional coverage =================
+class coverage extends uvm_subscriber #(transaction);
+  `uvm_component_utils(coverage)
+  
+  transaction t;
+  int cross_hits;
+  
+  covergroup alu_cg;
+    // Coverpoint for a: 16 bins (0..15)
+    a_cp: coverpoint t.a {
+      bins a_vals[] = {[0:15]};
+    }
+
+    // Coverpoint for b: 16 bins (0..15)
+    b_cp: coverpoint t.b {
+      bins b_vals[] = {[0:15]};
+    }
+
+    // Coverpoint for opcode: 8 bins (0..7)
+    opcode_cp: coverpoint t.opsel {
+      bins op_vals[] = {[0:7]};
+    }
+
+    // Full cross: 16 x 16 x 8 = 2048 bins
+    abc_cross: cross a_cp, b_cp, opcode_cp;
+  endgroup
+
+
+  function new(string name = "coverage", uvm_component parent = null);
+    super.new(name, parent);
+    alu_cg = new();
+  endfunction
+
+  virtual function void write(transaction t);
+    this.t = t;
+    alu_cg.sample();
+    cross_hits++; // Each sample is a cross hit since we have only one bin each
+  endfunction
+  
+  virtual function void report_phase(uvm_phase phase);
+    super.report_phase(phase);
+    $display("=== FUNCTIONAL COVERAGE REPORT ===");
+    $display("Overall Coverage: %.2f%%", alu_cg.get_coverage());
+    $display("A Coverage: %.2f%%", alu_cg.a_cp.get_coverage());
+    $display("B Coverage: %.2f%%", alu_cg.b_cp.get_coverage());
+    $display("Opcode Coverage: %.2f%%", alu_cg.opcode_cp.get_coverage());
+    $display("A x B x Opcode Cross Coverage: %.2f%%", alu_cg.abc_cross.get_coverage());
+    $display("");
+    $display("=== CROSS COVERAGE HITS ===");
+    $display("Total Cross Hits: %0d", cross_hits);
+    $display("Cross Bin: A[all] x B[all] x Opcode[all] = %0d hits", cross_hits);
+    $display("===========================");
+  endfunction
+endclass
+
+// ================= generator (sequence) =================
 class generator extends uvm_sequence #(transaction);
   transaction t;
   function new(string name = "generator"); super.new(name); endfunction
   `uvm_object_utils(generator)
 
   virtual task body();
-    repeat (1000) begin
-      t = transaction::type_id::create("t");
-      start_item(t);
-      assert(t.randomize());
-      `uvm_info("GEN", $sformatf("Data to driver a:%0d b:%0d opsel:%0d", t.a, t.b, t.opsel), UVM_LOW)
-      finish_item(t);
-      
+    // Loop through all 16 x 16 x 8 = 2048 combinations
+    for (int a_val = 0; a_val < 16; a_val++) begin
+      for (int b_val = 0; b_val < 16; b_val++) begin
+        for (int op_val = 0; op_val < 8; op_val++) begin
+          t = transaction::type_id::create("t");
+          start_item(t);
+          t.a     = a_val;
+          t.b     = b_val;
+          t.opsel = op_val;
+       `uvm_info("GEN", $sformatf("Deterministic Data -> a:%0d b:%0d opsel:%0d",
+                                      t.a, t.b, t.opsel), UVM_LOW)
+          finish_item(t);
+        end
+      end
     end
   endtask
 endclass
+
 
 // ================= driver =================
 class driver extends uvm_driver #(transaction);
@@ -65,14 +128,14 @@ class driver extends uvm_driver #(transaction);
     end
   endtask
 endclass
-// ================= monitor =================
 
+// ================= monitor =================
 class monitor extends uvm_monitor;
   `uvm_component_utils(monitor)
   uvm_analysis_port #(transaction) send;
   virtual alu_vif aif;
   transaction t;
-
+ 
   function new(string name = "monitor", uvm_component parent = null);
     super.new(name, parent);
     send = new("send", this);
@@ -94,22 +157,24 @@ class monitor extends uvm_monitor;
       @(posedge aif.clk);
       #2; //settling time
       
-      if (!first_cycle) begin  
+      if (!first_cycle) begin
+        
         t = transaction::type_id::create("t");
-        t.a = prev_a;     
-        t.b = prev_b;      
-        t.opsel = prev_opsel;  
-        t.result = aif.result;      
+        t.a      = prev_a;     
+        t.b      = prev_b;      
+        t.opsel  = prev_opsel;  
+        t.result = aif.result; 
+        
         `uvm_info("MON", $sformatf("To scoreboard a:%0d b:%0d opsel:%0d result:%0d",
-                   t.a, t.b, t.opsel, t.result), UVM_LOW)
+                 t.a, t.b, t.opsel, t.result), UVM_LOW)
         send.write(t);
       end
       else begin
         first_cycle = 0;
       end
       
-      prev_a = aif.a;
-      prev_b = aif.b;
+      prev_a     = aif.a;
+      prev_b     = aif.b;
       prev_opsel = aif.opsel;
     end
   endtask
@@ -185,6 +250,7 @@ endclass
 class env extends uvm_env;
   `uvm_component_utils(env)
   scoreboard s;
+  coverage cov;
   agent a;
 
   function new(string name = "env", uvm_component parent = null);
@@ -195,11 +261,13 @@ class env extends uvm_env;
     super.build_phase(phase);
     a = agent::type_id::create("a", this);
     s = scoreboard::type_id::create("s", this);
+    cov = coverage::type_id::create("cov", this);
   endfunction
 
   virtual function void connect_phase(uvm_phase phase);
     super.connect_phase(phase);
     a.m.send.connect(s.recv);
+    a.m.send.connect(cov.analysis_export);
   endfunction
 endclass
 
@@ -226,7 +294,7 @@ class test extends uvm_test;
     phase.drop_objection(this);
   endtask
 endclass
-////////////////////////
+
 module alu_tb;
   logic clk;
   logic rst;
@@ -249,8 +317,8 @@ module alu_tb;
     uvm_config_db#(virtual alu_vif)::set(null, "uvm_test_top.e.a.*", "aif", aif);
     run_test("test");
   end
-      
 endmodule
+
       
     
 
