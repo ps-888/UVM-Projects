@@ -55,7 +55,7 @@ class coverage extends uvm_subscriber #(transaction);
   virtual function void write(transaction t);
     this.t = t;
     alu_cg.sample();
-    cross_hits++; // Each sample is a cross hit since we have only one bin each
+    cross_hits++; 
   endfunction
   
   virtual function void report_phase(uvm_phase phase);
